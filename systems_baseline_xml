@@ -1,0 +1,378 @@
+<form>
+  <label>Systems Baseline</label>
+  <description>started 14 Aug 2021; Modified 4 Sep with IoT Only Check Box</description>
+  <search id="ipbase">
+    <query>| tstats  sum(All_Traffic.bytes) as bytes count from datamodel="Network_Traffic" where All_Traffic.src_ip=192.168.0.0/24  groupby All_Traffic.src_ip, All_Traffic.src_mac All_Traffic.protocol All_Traffic.dest_port All_Traffic.dest_ip _time
+| rename All_Traffic.src_mac as src_mac, All_Traffic.src_ip as src_ip, All_Traffic.protocol as protocol, All_Traffic.dest_ip as dest_ip
+</query>
+    <earliest>-3d@d</earliest>
+    <latest>@d</latest>
+    <sampleRatio>1</sampleRatio>
+  </search>
+  <fieldset submitButton="false">
+    <input type="multiselect" token="filter_iot">
+      <label>Filter Type</label>
+      <fieldForLabel>type_value</fieldForLabel>
+      <fieldForValue>type</fieldForValue>
+      <search>
+        <query>
+|inputlookup inventory_all.csv 
+| fields type
+| append 
+    [ |inputlookup mac_tracking.csv  
+    | fields type]
+  |dedup type 
+| search $iot_only$
+| eval type_value=(type)
+| append  [| makeresults | eval type="*",type_value="All"]
+| table type type_value |sort type_value
+| fields type type_value
+          </query>
+        <earliest>-3d@d</earliest>
+        <latest>@d</latest>
+        <sampleRatio>1</sampleRatio>
+      </search>
+      <delimiter>,</delimiter>
+      <default>*</default>
+    </input>
+    <!--    
+    <input type="radio" token="tkn_chk1">
+      <label>IoT Only</label>
+      <default>true</default>
+      <change>
+        <condition value="cbox">
+          <set token="chkA">"blah"</set>
+        </condition>
+        <condition value="false">
+          <set token="chkA"></set>
+        </condition>
+      </change>
+    </input>
+  
+    <input type="checkbox" token="tkn_chk5">
+      <label>IoT Only</label>
+      <choice value="bobbie">Chkz</choice>
+      <default>boobie</default>
+      <change>
+        <condition value="true">
+          <set token="chkz"></set>
+        </condition>
+        <condition value="*">
+          <unset token="chkz"></unset>
+        </condition>
+      </change>    
+    </input>    
+-->
+    <input type="checkbox" token="boxit">
+      <label>IoT Only</label>
+      <choice value="true">Only IoT</choice>
+      <default>type=iot*</default>
+      <change>
+        <condition value="true">
+          <set token="iot_only">type=iot*</set>
+        </condition>
+        <condition value="*">
+          <set token="iot_only"></set>
+        </condition>
+      </change>
+    </input>
+    <!--      
+    <input type="radio" token="tkn_chk5">
+      <label>Select Parameter</label>
+      <choice value="">Well</choice>
+      <default></default>-->
+    <!--      <choice value="output">Search by Output parameters</choice> 
+      <change>
+        <condition value="iot">
+          <set token="tkninput">"query"</set>
+          <unset token="tknoutput"></unset> 
+        </condition>-->
+    <!--        <condition value="output">
+          <unset token="tkninput"></unset>
+          <set token="tknoutput">$boop$</set>
+        </condition>
+        <condition>
+          <unset token="tkninput"></unset>
+          <unset token="tknoutput"></unset>
+        </condition> 
+      </change>
+    </input>    
+    
+ <input type="radio" token="selEvent" searchWhenChanged="true">
+  <label>Event Selectors</label>
+  <choice value="app">App Name</choice>
+  <choice value="component">Component</choice>
+  <choice value="host">Host</choice>
+  <default>host</default>
+</input>   -->
+  </fieldset>
+  <row>
+    <panel>
+      <title>based on count of unique DNS 2d level domain queries filtered for type IN($filter_iot$)  $iot_only$</title>
+      <table>
+        <search id="baseline_base">
+          <query>
+   <!--index="suricata" sourcetype="*json"  event_type=dns src_ip=192.168.0.0/24 
+dns.rrname!="*in-addr.arpa"
+| rex "(?i)\..*?\.(?P&lt;twold&gt;[a-z]+\.[a-z]+)(?=\")" -->
+
+| tstats values(DNS.query) dc(DNS.answer)  count from datamodel="Network_Resolution" where DNS.src=192.168* groupby DNS.src, _time
+
+| rename values(DNS.query) as name, DNS.src AS src_ip
+| rex  field="name" "(?i)\.*?\.(?P&lt;twold&gt;[a-zz0-9#\-]+\.[a-z]+)$" 
+| eval twold=coalesce(twold,name,"xx"), day=strftime(_time,"%A"), doy=strftime(_time,"%j")
+|lookup inventory_all.csv ip as src_ip output client type
+|lookup mac_tracking.csv ip as src_ip outputnew client type
+| eval client=coalesce( client, src_ip) 
+| fillnull value="--" client type 
+|search  $iot_only$ <!-- NOT type IN(*streaming, iot_refrigerator) -->
+
+type IN($filter_iot$)
+
+| stats dc(twold) as twoldc values(client) as client values(type) as type values(twold) as twold values(doy) as doy
+by src_ip, day
+
+| streamstats dc(twoldc) as twolddc by client
+|sort client, doy
+
+</query>
+          <earliest>-3d@d</earliest>
+          <latest>@d</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <fields>src_ip, day,	twoldc, client, type, twolddc</fields>
+        <drilldown>
+          <set token="ip_pick">$row.src_ip$</set>
+        </drilldown>
+        <option name="count">15</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="percentagesRow">false</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+        <format type="color" field="client">
+          <colorPalette type="sharedList"></colorPalette>
+          <scale type="sharedCategory"></scale>
+        </format>
+        <format type="color" field="twolddc">
+          <colorPalette type="map">{"2":#DC4E41,"3":#DC4E41,"4":#DC4E41}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row depends="$ip_pick$">
+    <panel>
+      <table>
+        <search base="baseline_base">
+          <query>
+            |search src_ip=$ip_pick$
+            |table date_wday,	twoldc, client, type, twold
+            
+          </query>
+        </search>
+        <drilldown>
+          <set token="twold_tok">$click.value2$</set>
+        </drilldown>
+        <option name="count">10</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="percentagesRow">false</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+  <row depends="$twold_tok$">
+    <panel>
+      <!--
+      <chart>
+        <title>chart for domain $twold_tok$</title>
+        <search base="baseline_base">
+          <query>
+            |search twold=$twold_tok$
+            |lookup inventory_all.csv ip as src_ip output client
+            |eval source_id=coalesce(client,src_ip, 1=1,"error")
+
+          </query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+      </chart>
+      -->
+      <html>
+        <a href="https://www.google.com/search?q=$twold_tok$" target="_blank">click for google search for $twold_tok$</a>
+        <p/>
+         <a href="https://www.google.com/search?q=$twold_tok$ malware" target="_blank">click for google search for $twold_tok$ "malware"</a>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Count of Dest IPs</title>
+      <table>
+        <search base="ipbase">
+          <query>
+| eval day=strftime(_time,"%A"), doy=strftime(_time,"%j")
+|lookup inventory_all.csv ip as src_ip output client type
+|lookup mac_tracking.csv ip as src_ip outputnew client type
+|search  $iot_only$
+
+type IN($filter_iot$)
+| stats  dc(dest_ip) as dipc  sum(bytes) as bytes values(doy) as doy values(client) as client values(type) as type by src_ip day
+| sort src_ip, doy
+| streamstats dc(dipc) as dipcc by client
+
+</query>
+        </search>
+        <fields>src_ip day bytes dipc client type dipcc</fields>
+        <drilldown>
+          <set token="ipdw">$row.src_ip$</set>
+        </drilldown>
+        <option name="count">12</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="percentagesRow">false</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+        <format type="color" field="dipcc">
+          <colorPalette type="map">{"2":#DC4E41,"3":#DC4E41,"4":#DC4E41}</colorPalette>
+        </format>
+        <format type="color" field="client">
+          <colorPalette type="sharedList"></colorPalette>
+          <scale type="sharedCategory"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row depends="$ipdw$">
+    <panel>
+      <table>
+        <title>drilldown for $ipdw$</title>
+        <search base="ipbase">
+          <query>
+
+| eval day=strftime(_time,"%A"), doy=strftime(_time,"%j")
+|lookup inventory_all.csv ip as src_ip output client type
+|lookup mac_tracking.csv ip as src_ip outputnew client type
+|search  src_ip=$ipdw$
+| eval clientip=(dest_ip)
+| lookup dnslookup clientip 
+| fillnull value="--"
+| stats sparkline sum(bytes) as bytes values(doy) as doy count by day src_ip client type dest_ip clienthost, protocol 
+| table day src_ip client type dest_ip clienthost, protocol bytes sparkline count
+| sort - doy dest_ip
+
+        </query>
+        </search>
+        <option name="count">12</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">none</option>
+        <option name="percentagesRow">false</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+        <format type="color" field="dest_ip">
+          <colorPalette type="sharedList"></colorPalette>
+          <scale type="sharedCategory"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <search base="ipbase">
+          <query>
+            <!--| tstats  sum(All_Traffic.bytes) as bytes count from datamodel="Network_Traffic" where All_Traffic.src_ip=192.168.0.0/24  groupby All_Traffic.src_ip, All_Traffic.src_mac All_Traffic.protocol All_Traffic.dest_port All_Traffic.dest_ip _time
+| rename All_Traffic.src_mac as src_mac, All_Traffic.src_ip as src_ip, All_Traffic.protocol as protocol, All_Traffic.dest_ip as dest_ip-->
+
+|lookup inventory_all.csv ip as src_ip output client type
+|lookup mac_tracking.csv ip as src_ip outputnew client type
+|search  $iot_only$
+type IN($filter_iot$)
+| timechart span=1h dc(dest_ip)  by client useother=f limit=0
+</query>
+        </search>
+        <option name="charting.axisLabelsX.majorLabelStyle.overflowMode">ellipsisNone</option>
+        <option name="charting.axisLabelsX.majorLabelStyle.rotation">0</option>
+        <option name="charting.axisTitleX.visibility">visible</option>
+        <option name="charting.axisTitleY.visibility">visible</option>
+        <option name="charting.axisTitleY2.visibility">visible</option>
+        <option name="charting.axisX.abbreviation">none</option>
+        <option name="charting.axisX.scale">linear</option>
+        <option name="charting.axisY.abbreviation">none</option>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.axisY2.abbreviation">none</option>
+        <option name="charting.axisY2.enabled">0</option>
+        <option name="charting.axisY2.scale">inherit</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.bubbleMaximumSize">50</option>
+        <option name="charting.chart.bubbleMinimumSize">10</option>
+        <option name="charting.chart.bubbleSizeBy">area</option>
+        <option name="charting.chart.nullValueMode">gaps</option>
+        <option name="charting.chart.showDataLabels">none</option>
+        <option name="charting.chart.sliceCollapsingThreshold">0.01</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.chart.style">shiny</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.layout.splitSeries">0</option>
+        <option name="charting.layout.splitSeries.allowIndependentYRanges">0</option>
+        <option name="charting.legend.labelStyle.overflowMode">ellipsisMiddle</option>
+        <option name="charting.legend.mode">standard</option>
+        <option name="charting.legend.placement">right</option>
+        <option name="charting.lineWidth">2</option>
+        <option name="height">514</option>
+        <option name="trellis.enabled">0</option>
+        <option name="trellis.scales.shared">1</option>
+        <option name="trellis.size">medium</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Experimental Dest Port Review</title>
+      <table>
+        <search>
+          <query>
+            <!--
+          | tstats summariesonly=false allow_old_summaries=true count from datamodel=Network_Traffic where All_Traffic.action!=blocked  AND All_Traffic.src=192.168.0.0/24 by All_Traffic.user All_Traffic.src All_Traffic.dest All_Traffic.transport  All_Traffic.dest_port _time
+| rename All_Traffic.* as *
+| fillnull value="(unk)" protocol
+| stats  count by  src dest_port transport
+| eval proto_count=(count+"-"+transport)
+| where src!="192.168.0.27"
+| xyseries src dest_port proto_count  -->
+
+| tstats summariesonly=false allow_old_summaries=true count from datamodel=Network_Traffic where All_Traffic.action!=blocked  AND All_Traffic.src=192.168.0.0/24 by All_Traffic.user All_Traffic.src All_Traffic.dest All_Traffic.transport  All_Traffic.dest_port _time
+| rename All_Traffic.* as *
+| fillnull value="(unk)" protocol
+| eval dpt_range=case(dest_port&lt;1024,dest_port,dest_port&lt;49151,"Regisgtered",1=1,"Rendom_High")
+| eval transport=if(dest_port="0","icmp",transport)
+| stats values(dest_port) as dptv count by  src dpt_range transport
+
+| eval proto_count=(count+"-"+transport)
+
+| where src!="192.168.0.27" <!--my nmap scanner :) -->
+| sort + dptv
+| chart values(proto_count)  by  src dpt_range limit=0
+
+          </query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <option name="count">100</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">none</option>
+        <option name="percentagesRow">false</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</form>
